@@ -95,8 +95,10 @@
         const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
         const firebaseConfig = typeof window.__firebase_config !== 'undefined' ? JSON.parse(window.__firebase_config) : {};
         const initialAuthToken = typeof window.__initial_auth_token !== 'undefined' ? window.__initial_auth_token : undefined;
-        // Chave de API para o Gemini
-        const apiKey = ""; 
+        
+        // ** A CHAVE DE API FOI INSERIDA AQUI **
+        // Sua chave fornecida: AIzaSyDOovtBooIqM5RXJEVldmzdbjwCc_xBHpQ
+        const apiKey = "AIzaSyDOovtBooIqM5RXJEVldmzdbjwCc_xBHpQ"; 
         
         // Instâncias Firebase
         let app, auth, userId;
@@ -184,6 +186,11 @@
          * Lógica de retry com backoff exponencial para chamadas de API.
          */
         async function fetchWithBackoff(url, options, maxRetries = 5, initialDelay = 1000) {
+            // Se a chave não estiver preenchida, retorna erro imediatamente no GitHub
+            if (!apiKey) {
+                 throw new Error("API Key ausente. Por favor, insira a chave no código.");
+            }
+            
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
                     const response = await fetch(url, options);
@@ -232,6 +239,7 @@
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
                 systemInstruction: { parts: [{ text: systemPrompt }] },
+                tools: [{ "google_search": {} }],
                 generationConfig: {
                     responseMimeType: "application/json",
                     responseSchema: {
@@ -286,7 +294,7 @@
             } catch (error) {
                 console.error("Erro ao gerar questões:", error);
                 // Feedback de erro para o usuário na tela
-                appMessage.textContent = "❌ Erro ao gerar as questões. Tente novamente.";
+                appMessage.textContent = `❌ Erro ao gerar as questões. Causa: ${error.message}. Verifique sua API Key e a conexão.`;
                 appMessage.classList.remove('hidden');
                 appMessage.classList.add('bg-red-100', 'text-red-700');
                 resetApp();
@@ -300,7 +308,10 @@
 
         function submitQuiz() {
             if (Object.keys(userAnswers).length !== questionsData.length) {
-                alert("Por favor, responda todas as 20 questões antes de finalizar!");
+                // Mensagem customizada no lugar de alert()
+                appMessage.textContent = "Por favor, responda todas as 20 questões antes de finalizar!";
+                appMessage.classList.remove('hidden');
+                appMessage.classList.add('bg-red-100', 'text-red-700');
                 return;
             }
 
@@ -371,11 +382,10 @@
         
         document.addEventListener('DOMContentLoaded', () => {
             // --- Firebase Initialization and Auth ---
+            // A inicialização do Firebase é mantida por requisitos do ambiente, mas não afeta o simulado.
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
             
-            // Lógica de autenticação mantida para conformidade com o ambiente,
-            // mas não afeta o funcionamento do simulado.
             onAuthStateChanged(auth, (user) => {
                 if (user) {
                     userId = user.uid;
