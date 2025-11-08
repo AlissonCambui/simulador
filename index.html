@@ -96,8 +96,7 @@
         const firebaseConfig = typeof window.__firebase_config !== 'undefined' ? JSON.parse(window.__firebase_config) : {};
         const initialAuthToken = typeof window.__initial_auth_token !== 'undefined' ? window.__initial_auth_token : undefined;
         
-        // ** A CHAVE DE API FOI INSERIDA AQUI **
-        // Sua chave fornecida: AIzaSyDOovtBooIqM5RXJEVldmzdbjwCc_xBHpQ
+        // ** CHAVE DE API INSERIDA **
         const apiKey = "AIzaSyDOovtBooIqM5RXJEVldmzdbjwCc_xBHpQ"; 
         
         // Instâncias Firebase
@@ -194,9 +193,19 @@
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
                     const response = await fetch(url, options);
+                    
                     if (response.status === 429) {
                         throw new Error("Rate limit exceeded (429)");
                     }
+                    
+                    // CORREÇÃO CRÍTICA: Verifica erros de autenticação (400, 401, 403) e para imediatamente.
+                    if (response.status === 400 || response.status === 401 || response.status === 403) {
+                         const errorBody = await response.json().catch(() => ({})); 
+                         const errorMessage = errorBody.error?.message || `Erro de autenticação/permissão. Código: ${response.status}.`;
+                         throw new Error(`API Key Inválida ou Sem Permissão. ${errorMessage} Verifique se a chave está correta e se a API Gemini está ativada.`);
+                    }
+
+
                     if (!response.ok) {
                          // Trata outros erros HTTP como falha
                         const errorBody = await response.text();
@@ -208,6 +217,7 @@
                         throw error; // Última tentativa falhou, lança o erro final
                     }
                     const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 500;
+                    // Este é o log de tentativa que você estava vendo:
                     console.error(`Attempt ${attempt + 1} failed. Retrying in ${delay / 1000}s...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
@@ -239,7 +249,6 @@
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
                 systemInstruction: { parts: [{ text: systemPrompt }] },
-                tools: [{ "google_search": {} }],
                 generationConfig: {
                     responseMimeType: "application/json",
                     responseSchema: {
@@ -254,7 +263,7 @@
                                     "items": { "type": "STRING" }
                                 },
                                 "answer": { "type": "STRING" },
-                                "explanation": { "type": "STRING" }
+                                "explanation": { "type": "STRING" } 
                             },
                             "required": ["id", "question", "options", "answer", "explanation"]
                         }
@@ -294,7 +303,8 @@
             } catch (error) {
                 console.error("Erro ao gerar questões:", error);
                 // Feedback de erro para o usuário na tela
-                appMessage.textContent = `❌ Erro ao gerar as questões. Causa: ${error.message}. Verifique sua API Key e a conexão.`;
+                // A mensagem de erro agora será mais clara se for um erro 400/403
+                appMessage.textContent = `❌ Erro ao gerar as questões. Causa: ${error.message}. Por favor, verifique sua chave de API e ative a API Gemini no seu projeto.`;
                 appMessage.classList.remove('hidden');
                 appMessage.classList.add('bg-red-100', 'text-red-700');
                 resetApp();
@@ -308,10 +318,14 @@
 
         function submitQuiz() {
             if (Object.keys(userAnswers).length !== questionsData.length) {
-                // Mensagem customizada no lugar de alert()
+                // Usando UI customizada no lugar de alert()
                 appMessage.textContent = "Por favor, responda todas as 20 questões antes de finalizar!";
                 appMessage.classList.remove('hidden');
                 appMessage.classList.add('bg-red-100', 'text-red-700');
+                
+                // Mostra a mensagem no topo da seção de entrada (onde o appMessage está visível)
+                // Se a mensagem precisar aparecer no quiz, teríamos que movê-la
+                showSection(quizSection); 
                 return;
             }
 
@@ -382,10 +396,11 @@
         
         document.addEventListener('DOMContentLoaded', () => {
             // --- Firebase Initialization and Auth ---
-            // A inicialização do Firebase é mantida por requisitos do ambiente, mas não afeta o simulado.
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
             
+            // Lógica de autenticação mantida para conformidade com o ambiente,
+            // mas não afeta o funcionamento do simulado.
             onAuthStateChanged(auth, (user) => {
                 if (user) {
                     userId = user.uid;
