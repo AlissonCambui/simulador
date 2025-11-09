@@ -23,20 +23,33 @@
     <div id="app" class="w-full max-w-4xl space-y-8">
         <header class="text-center pt-4 pb-2">
             <h1 class="text-4xl font-bold text-gray-800">Simulado Jurídico 🧠</h1>
-            <p class="text-gray-500 mt-1">Gere 20 questões de Direito sobre qualquer tema.</p>
+            <p class="text-gray-500 mt-1">Gere 20 questões de Direito usando texto ou arquivos PDF.</p>
         </header>
 
-        <!-- Seção de Entrada do Tema -->
+        <!-- Seção de Entrada do Tema e Arquivo -->
         <div id="topic-input-section" class="card p-6 space-y-4">
-            <h2 class="text-xl font-semibold text-gray-700">1. Insira o Tema da Prova</h2>
+            <h2 class="text-xl font-semibold text-gray-700">1. Fonte do Simulado</h2>
+            
+            <!-- Entrada de Arquivo PDF -->
             <div>
-                <label for="lawTopic" class="block text-sm font-medium text-gray-700 mb-1">Tópico de Direito (Ex: "Morte Presumida", "Teoria da Culpa", "Usucapião")</label>
-                <input type="text" id="lawTopic" placeholder="Digite o tema aqui..." class="w-full p-3 border border-gray-300 rounded-lg focus:ring-emerald-500 focus:border-emerald-500 shadow-sm" required>
+                <label for="pdfFile" class="block text-sm font-medium text-gray-700 mb-1">
+                    Arquivo PDF (Opcional: use este para criar questões a partir do seu material)
+                </label>
+                <input type="file" id="pdfFile" accept="application/pdf" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-emerald-500 focus:border-emerald-500 shadow-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100">
             </div>
+
+            <!-- Entrada de Tópico de Texto -->
+            <div>
+                <label for="lawTopic" class="block text-sm font-medium text-gray-700 mb-1">
+                    Tópico de Direito (Obrigatório, mesmo com PDF)
+                </label>
+                <input type="text" id="lawTopic" placeholder="Ex: 'Contratos Aleatórios' ou 'Questões sobre o PDF'" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-emerald-500 focus:border-emerald-500 shadow-sm" required>
+            </div>
+            
             <button id="generateBtn" class="w-full btn-primary bg-emerald-600 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center">
                 Gerar 20 Questões
             </button>
-            <p class="text-sm text-center text-gray-500 mt-2">O simulado será gerado em formato de múltipla escolha (A-E).</p>
+            <p class="text-sm text-center text-gray-500 mt-2">O sistema usará o PDF (se fornecido) ou apenas o tópico de texto para gerar o simulado.</p>
             <div id="app-message" class="hidden p-2 text-center rounded-lg font-medium"></div>
         </div>
 
@@ -44,7 +57,7 @@
         <div id="loading-indicator" class="card p-6 text-center hidden">
             <div class="flex flex-col items-center justify-center space-y-3">
                 <div class="loading-ring"></div>
-                <p class="text-gray-600 font-medium">Gerando questões complexas... Aguarde um momento.</p>
+                <p class="text-gray-600 font-medium">Gerando questões complexas... Analisando material. Aguarde um momento.</p>
                 <p class="text-sm text-gray-500">Isso pode levar alguns segundos, pois estamos estruturando o simulado.</p>
             </div>
         </div>
@@ -96,7 +109,7 @@
         const firebaseConfig = typeof window.__firebase_config !== 'undefined' ? JSON.parse(window.__firebase_config) : {};
         const initialAuthToken = typeof window.__initial_auth_token !== 'undefined' ? window.__initial_auth_token : undefined;
         
-        // ** CHAVE DE API INSERIDA **
+        // CHAVE DE API DO GEMINI - INSERIDA PARA FUNCIONAR FORA DO CANVAS
         const apiKey = "AIzaSyDOovtBooIqM5RXJEVldmzdbjwCc_xBHpQ"; 
         
         // Instâncias Firebase
@@ -109,6 +122,7 @@
         const resultSection = document.getElementById('result-section');
         const generateBtn = document.getElementById('generateBtn');
         const lawTopicInput = document.getElementById('lawTopic');
+        const pdfFileInput = document.getElementById('pdfFile');
         const questionsContainer = document.getElementById('questions-container');
         const submitBtn = document.getElementById('submitBtn');
         const appMessage = document.getElementById('app-message');
@@ -185,8 +199,7 @@
          * Lógica de retry com backoff exponencial para chamadas de API.
          */
         async function fetchWithBackoff(url, options, maxRetries = 5, initialDelay = 1000) {
-            // Se a chave não estiver preenchida, retorna erro imediatamente no GitHub
-            if (!apiKey) {
+             if (!apiKey) {
                  throw new Error("API Key ausente. Por favor, insira a chave no código.");
             }
             
@@ -217,11 +230,28 @@
                         throw error; // Última tentativa falhou, lança o erro final
                     }
                     const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 500;
-                    // Este é o log de tentativa que você estava vendo:
                     console.error(`Attempt ${attempt + 1} failed. Retrying in ${delay / 1000}s...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
+        }
+        
+        /** Converte um arquivo em Base64 */
+        function fileToGenerativePart(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64Data = reader.result.split(',')[1];
+                    resolve({
+                        inlineData: {
+                            data: base64Data,
+                            mimeType: file.type
+                        }
+                    });
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
         }
 
 
@@ -229,25 +259,44 @@
 
         async function generateQuestions() {
             const topic = lawTopicInput.value.trim();
+            const file = pdfFileInput.files[0];
+
             if (!topic) {
-                // Não usamos alert(), então mudamos a UI brevemente
-                lawTopicInput.classList.add('border-red-500', 'ring-2', 'ring-red-500');
-                setTimeout(() => lawTopicInput.classList.remove('border-red-500', 'ring-2', 'ring-red-500'), 2000);
+                appMessage.textContent = "O tópico de Direito é obrigatório.";
+                appMessage.classList.remove('hidden');
+                appMessage.classList.add('bg-red-100', 'text-red-700');
                 return;
+            }
+
+            if (!file && topic.length < 5) {
+                 appMessage.textContent = "Por favor, insira um tópico mais descritivo ou carregue um PDF.";
+                 appMessage.classList.remove('hidden');
+                 appMessage.classList.add('bg-red-100', 'text-red-700');
+                 return;
             }
 
             showSection(loadingIndicator);
             lawTopicInput.disabled = true;
+            pdfFileInput.disabled = true;
             generateBtn.disabled = true;
 
-            // Prompt estruturado para a geração das questões
-            const systemPrompt = `Você é um professor universitário de Direito altamente experiente. Sua tarefa é gerar exatamente 20 questões de múltipla escolha de alto nível, com 5 alternativas (A, B, C, D, E), sobre o tópico jurídico: "${topic}". Para cada questão, forneça a alternativa correta ("A", "B", "C", "D" ou "E") e uma breve explicação jurídica. Use cenários e linguagem complexa apropriada para um estudante de Direito.`;
-            const userQuery = `Gere as 20 questões de múltipla escolha sobre o tema de Direito: ${topic}.`;
+            const userPrompt = file 
+                ? `Analise o arquivo PDF fornecido e gere exatamente 20 questões de múltipla escolha (A-E) de alto nível sobre o tema: "${topic}", baseadas no conteúdo do arquivo. Para cada questão, forneça a alternativa correta ("A", "B", "C", "D" ou "E") e uma explicação jurídica.`
+                : `Gere exatamente 20 questões de múltipla escolha (A-E) de alto nível sobre o tema de Direito: "${topic}". Para cada questão, forneça a alternativa correta ("A", "B", "C", "D" ou "E") e uma explicação jurídica.`;
+
+            // Construir o array de conteúdo
+            const contentsParts = [{ text: userPrompt }];
+            if (file) {
+                const filePart = await fileToGenerativePart(file);
+                contentsParts.push(filePart);
+            }
 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const systemPrompt = `Você é um professor universitário de Direito altamente experiente. Sua única saída deve ser um array JSON contendo 20 objetos de questão.`;
+
 
             const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
+                contents: [{ parts: contentsParts }],
                 systemInstruction: { parts: [{ text: systemPrompt }] },
                 generationConfig: {
                     responseMimeType: "application/json",
@@ -302,14 +351,19 @@
 
             } catch (error) {
                 console.error("Erro ao gerar questões:", error);
+                
                 // Feedback de erro para o usuário na tela
-                // A mensagem de erro agora será mais clara se for um erro 400/403
-                appMessage.textContent = `❌ Erro ao gerar as questões. Causa: ${error.message}. Por favor, verifique sua chave de API e ative a API Gemini no seu projeto.`;
+                const errorMessage = error.message.includes('API Key Inválida')
+                    ? "❌ Chave de API Inválida ou a API Gemini não está ativada no seu projeto Google Cloud."
+                    : `❌ Erro ao gerar as questões. Causa: ${error.message}.`;
+
+                appMessage.textContent = errorMessage;
                 appMessage.classList.remove('hidden');
                 appMessage.classList.add('bg-red-100', 'text-red-700');
                 resetApp();
             } finally {
                 lawTopicInput.disabled = false;
+                pdfFileInput.disabled = false;
                 generateBtn.disabled = false;
             }
         }
@@ -322,10 +376,7 @@
                 appMessage.textContent = "Por favor, responda todas as 20 questões antes de finalizar!";
                 appMessage.classList.remove('hidden');
                 appMessage.classList.add('bg-red-100', 'text-red-700');
-                
-                // Mostra a mensagem no topo da seção de entrada (onde o appMessage está visível)
-                // Se a mensagem precisar aparecer no quiz, teríamos que movê-la
-                showSection(quizSection); 
+                showSection(quizSection); // Garante que a mensagem seja vista
                 return;
             }
 
@@ -382,6 +433,7 @@
 
         window.resetApp = () => {
             lawTopicInput.value = '';
+            pdfFileInput.value = '';
             questionsContainer.innerHTML = '';
             questionsData = [];
             userAnswers = {};
